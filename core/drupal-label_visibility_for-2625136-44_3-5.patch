@@ -1,0 +1,203 @@
+diff --git a/core/modules/views/src/Plugin/views/filter/Date.php b/core/modules/views/src/Plugin/views/filter/Date.php
+index dbb573f..e8afb8b 100644
+--- a/core/modules/views/src/Plugin/views/filter/Date.php
++++ b/core/modules/views/src/Plugin/views/filter/Date.php
+@@ -141,7 +141,7 @@ public function acceptExposedInput($input) {
+     // Don't filter if value(s) are empty.
+     $operators = $this->operators();
+     if (!empty($this->options['expose']['use_operator']) && !empty($this->options['expose']['operator_id'])) {
+-      $operator = $input[$this->options['expose']['operator_id']];
++      $operator = $input[$this->options['expose']['identifier']]['operator'];
+     }
+     else {
+       $operator = $this->operator;
+diff --git a/core/modules/views/src/Plugin/views/filter/NumericFilter.php b/core/modules/views/src/Plugin/views/filter/NumericFilter.php
+index 7f687a1..ce2c733 100644
+--- a/core/modules/views/src/Plugin/views/filter/NumericFilter.php
++++ b/core/modules/views/src/Plugin/views/filter/NumericFilter.php
+@@ -5,7 +5,7 @@
+ use Drupal\Core\Form\FormStateInterface;
+ 
+ /**
+- * Simple filter to handle greater than/less than filters
++ * Simple filter to handle greater than/less than filters.
+  *
+  * @ingroup views_filter_handlers
+  *
+@@ -87,7 +87,7 @@ public function operators() {
+       ],
+     ];
+ 
+-    // if the definition allows for the empty operator, add it.
++    // If the definition allows for the empty operator, add it.
+     if (!empty($this->definition['allow empty'])) {
+       $operators += [
+         'empty' => [
+@@ -109,7 +109,7 @@ public function operators() {
+   }
+ 
+   /**
+-   * Provide a list of all the numeric operators
++   * Provide a list of all the numeric operators.
+    */
+   public function operatorOptions($which = 'title') {
+     $options = [];
+@@ -130,36 +130,52 @@ protected function operatorValues($values = 1) {
+ 
+     return $options;
+   }
++
+   /**
+-   * Provide a simple textfield for equality
++   * Provide a simple textfield for equality.
+    */
+   protected function valueForm(&$form, FormStateInterface $form_state) {
+-    $form['value']['#tree'] = TRUE;
++    // Set a filter wrapper.
++    $exposed = !empty($this->options['expose']);
++    $wrapped = ($exposed && in_array($this->operator, $this->operatorValues(2))) || !empty($this->options['expose']['use_operator']);
++    if ($wrapped) {
++      $form['value']['#type'] = 'fieldset';
++      if (!empty($this->exposedInfo()['label'])) {
++        $form['value']['#title'] = $this->exposedInfo()['label'];
++      }
++      if (!empty($this->exposedInfo()['description'])) {
++        $form['value']['#description'] = $this->exposedInfo()['description'];
++      }
++      if ($exposed) {
++        $form['value']['operator'] = $form[$this->options['expose']['operator_id']];
++        unset($form[$this->options['expose']['operator_id']]);
++      }
++    }
+ 
+     // We have to make some choices when creating this as an exposed
+     // filter form. For example, if the operator is locked and thus
+     // not rendered, we can't render dependencies; instead we only
+     // render the form items we need.
+     $which = 'all';
+-    if (!empty($form['operator'])) {
+-      $source = ':input[name="options[operator]"]';
+-    }
+-
+-    if ($exposed = $form_state->get('exposed')) {
++    if ($exposed) {
+       $identifier = $this->options['expose']['identifier'];
+ 
+       if (empty($this->options['expose']['use_operator']) || empty($this->options['expose']['operator_id'])) {
+-        // exposed and locked.
++        // Exposed and locked.
+         $which = in_array($this->operator, $this->operatorValues(2)) ? 'minmax' : 'value';
+       }
+       else {
+-        $source = ':input[name="' . $this->options['expose']['operator_id'] . '"]';
++        $source = ':input[name="' . $this->options['expose']['identifier'] . '[operator]"]';
+       }
+     }
++    // Need to adjust the states source for the filter admin form.
++    if (!empty($form['operator'])) {
++      $source = ':input[name="options[operator]"]';
++    }
+ 
+     $user_input = $form_state->getUserInput();
+     if ($which == 'all') {
+-      $form['value']['value'] = [
++      $value['value'] = [
+         '#type' => 'textfield',
+         '#title' => !$exposed ? $this->t('Value') : '',
+         '#size' => 30,
+@@ -167,7 +183,7 @@ protected function valueForm(&$form, FormStateInterface $form_state) {
+       ];
+       // Setup #states for all operators with one value.
+       foreach ($this->operatorValues(1) as $operator) {
+-        $form['value']['value']['#states']['visible'][] = [
++        $value['value']['#states']['visible'][] = [
+           $source => ['value' => $operator],
+         ];
+       }
+@@ -179,7 +195,7 @@ protected function valueForm(&$form, FormStateInterface $form_state) {
+     elseif ($which == 'value') {
+       // When exposed we drop the value-value and just do value if
+       // the operator is locked.
+-      $form['value'] = [
++      $value = [
+         '#type' => 'textfield',
+         '#title' => !$exposed ? $this->t('Value') : '',
+         '#size' => 30,
+@@ -192,16 +208,15 @@ protected function valueForm(&$form, FormStateInterface $form_state) {
+     }
+ 
+     if ($which == 'all' || $which == 'minmax') {
+-      $form['value']['min'] = [
++      $value['min'] = [
+         '#type' => 'textfield',
+-        '#title' => !$exposed ? $this->t('Min') : $this->exposedInfo()['label'],
++        '#title' => $exposed ? $this->t('Min') : '',
+         '#size' => 30,
+         '#default_value' => $this->value['min'],
+-        '#description' => !$exposed ? '' : $this->exposedInfo()['description']
+       ];
+-      $form['value']['max'] = [
++      $value['max'] = [
+         '#type' => 'textfield',
+-        '#title' => !$exposed ? $this->t('And max') : $this->t('And'),
++        '#title' => $exposed ? $this->t('And max') : $this->t('And'),
+         '#size' => 30,
+         '#default_value' => $this->value['max'],
+       ];
+@@ -213,9 +228,10 @@ protected function valueForm(&$form, FormStateInterface $form_state) {
+             $source => ['value' => $operator],
+           ];
+         }
+-        $form['value']['min'] += $states;
+-        $form['value']['max'] += $states;
++        $value['min'] += $states;
++        $value['max'] += $states;
+       }
++
+       if ($exposed && !isset($user_input[$identifier]['min'])) {
+         $user_input[$identifier]['min'] = $this->value['min'];
+       }
+@@ -223,14 +239,16 @@ protected function valueForm(&$form, FormStateInterface $form_state) {
+         $user_input[$identifier]['max'] = $this->value['max'];
+       }
+ 
+-      if (!isset($form['value'])) {
++      if (!isset($value)) {
+         // Ensure there is something in the 'value'.
+-        $form['value'] = [
++        $value = [
+           '#type' => 'value',
+           '#value' => NULL
+         ];
+       }
+     }
++    $form['value'] += $value;
++    $form['value']['value']['#tree'] = TRUE;
+   }
+ 
+   public function query() {
+@@ -297,14 +315,14 @@ public function adminSummary() {
+   }
+ 
+   /**
+-   * Do some minor translation of the exposed input
++   * Do some minor translation of the exposed input.
+    */
+   public function acceptExposedInput($input) {
+     if (empty($this->options['exposed'])) {
+       return TRUE;
+     }
+ 
+-    // rewrite the input value so that it's in the correct format so that
++    // Rewrite the input value so that it's in the correct format so that
+     // the parent gets the right data.
+     if (!empty($this->options['expose']['identifier'])) {
+       $value = &$input[$this->options['expose']['identifier']];
+@@ -327,6 +345,7 @@ public function acceptExposedInput($input) {
+               return FALSE;
+             }
+             break;
++
+           case 2:
+             if ($value['min'] === '' && $value['max'] === '') {
+               return FALSE;
